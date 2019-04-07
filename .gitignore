@@ -20,3 +20,6 @@ jenkins_home/
 
 # credential files
 .credentials
+
+# registry data
+registry-data/
