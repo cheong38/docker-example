@@ -22,4 +22,4 @@ jenkins_home/
 .credentials
 
 # registry data
-registry-data/
+registry-data/ 
