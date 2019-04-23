@@ -39,3 +39,28 @@ pod "simple-echo" deleted
 $ kubectl delete -f simple-pod.yml
 pod "simple-echo" deleted
 ```
+
+## Replica Set
+똑같은 정의를 갖는 pod 를 여러 개 생성하고 관리하기 위한 리소스
+```
+$ kubectl apply -f simple-replicaset.yml
+replicaset.apps "echo" created
+
+$ kubectl get pod
+NAME         READY     STATUS    RESTARTS   AGE
+echo-7dlv4   2/2       Running   0          30s
+echo-qshkk   2/2       Running   0          30s
+echo-slpxc   2/2       Running   0          30s
+```
+
+Replica Set 를 삭제하는 방법은 아래와 같다.
+```
+$ kubectl delete -f simple-replicaset.yml
+replicaset.apps "echo" deleted
+
+$ kubectl get pod
+NAME         READY     STATUS        RESTARTS   AGE
+echo-7dlv4   2/2       Terminating   0          1m
+echo-qshkk   2/2       Terminating   0          1m
+echo-slpxc   2/2       Terminating   0          1m
+```
