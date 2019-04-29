@@ -190,3 +190,169 @@ deployment 및 replicaset 와 pod 삭제하기
 $ kubectl delete -f simple-deployment.yml
 deployment.apps "echo" deleted
 ```
+
+## 서비스
+클러스터 안에서 pod 의 집합 (주로 replica set) 에 대한 경로나 서비스 디스커버리를 제공하는 리소스
+```
+$ kubectl apply -f simple-replicaset-with-label.yml
+replicaset.apps "echo-summer" created
+
+$ kubectl get pod -l app=echo -l release=spring
+NAME                READY     STATUS    RESTARTS   AGE
+echo-spring-7t4rf   2/2       Running   0          14s
+
+$ kubectl get pod -l app=echo -l release=summer
+NAME                READY     STATUS    RESTARTS   AGE
+echo-summer-7dq4t   2/2       Running   0          24s
+echo-summer-fxf7k   2/2       Running   0          24s
+```
+
+이제 relase=summer 인 pod 만 접근할 수 있는 서비스를 생성해보자.
+```
+$ kubectl apply -f simple-service.yml
+service "echo" created
+
+$ kubectl get svc echo
+NAME      TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+echo      ClusterIP   10.99.223.242   <none>        80/TCP    7s
+```
+
+서비스는 기본적으로 클러스터 안에서만 접근할 수 있으므로 디버깅용 임시 컨테이너를 배포하고 curl 명령으로 HTTP 요청을 확인해 보자.
+```
+$ kubectl run -it --rm debug --image=gihyodocker/fundamental:0.1.0 --restart=Never -- bash -il
+If you don't see a command prompt, try pressing enter.
+debug:/# curl http://echo/
+Hello Docker!!debug:/#
+
+$ kubectl get pod
+NAME                READY     STATUS    RESTARTS   AGE
+echo-spring-7t4rf   2/2       Running   0          13m
+echo-summer-7dq4t   2/2       Running   0          16m
+echo-summer-fxf7k   2/2       Running   0          16m
+
+$ kubectl logs -f echo-summer-7dq4t -c echo
+2019/04/26 05:38:26 start server
+2019/04/26 05:52:50 received request
+```
+
+### ingress
+클러터스의 외부 노출과 정교한 HTTP/HTTPS 라우팅을 동시에 사용 가능하게 함.
+```
+$ kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/mandatory.yaml
+namespace "ingress-nginx" created
+configmap "nginx-configuration" created
+configmap "tcp-services" created
+configmap "udp-services" created
+serviceaccount "nginx-ingress-serviceaccount" created
+clusterrole.rbac.authorization.k8s.io "nginx-ingress-clusterrole" created
+role.rbac.authorization.k8s.io "nginx-ingress-role" created
+rolebinding.rbac.authorization.k8s.io "nginx-ingress-role-nisa-binding" created
+clusterrolebinding.rbac.authorization.k8s.io "nginx-ingress-clusterrole-nisa-binding" created
+deployment.apps "nginx-ingress-controller" created
+
+$ kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/provider/cloud-generic.yaml
+service "ingress-nginx" created
+
+$ kubectl -n ingress-nginx get service,pod
+NAME                    TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)                      AGE
+service/ingress-nginx   LoadBalancer   10.110.123.192   localhost     80:32050/TCP,443:30138/TCP   1m
+
+NAME                                            READY     STATUS    RESTARTS   AGE
+pod/nginx-ingress-controller-78474696b4-zgtvk   1/1       Running   0          1m
+```
+
+`simple-service.yml` 을 다음과 같이 수정한다.
+```
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo
+spec:
+  selector:
+    app: echo
+  ports:
+    - name: http
+      port: 80
+```
+
+`simple-ingress.yml` 을 만들고 다음과 같이 입력한다.
+```
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: echo
+spec:
+  rules:
+    - host: ch05.gihyo.local
+      http:
+        paths:
+          - path: /
+            backend:
+              serviceName: echo
+              servicePort: 80
+```
+
+이제 ingress 를 반영한다.
+```
+$ kubectl apply -f simple-ingress.yml
+ingress.extensions "echo" created
+
+$ kubectl get ingress
+NAME      HOSTS              ADDRESS     PORTS     AGE
+echo      ch05.gihyo.local   localhost   80        25s
+```
+
+이제 로컬에서 http 요청을 통해 응답을 확인할 수 있다.
+```
+$ curl http://localhost -H 'Host: ch05.gihyo.local'
+Hello Docker!!
+```
+
+ingress 층에서 HTTP 요청에 대해 다양한 제어를 할 수 있다.  
+`simple-ingress.yml` 을 다음과 같이 수정하자.
+```
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: echo
+  annotations:
+    nginx.ingress.kubernetes.io/server-snippet: |
+      set $agentflag 0;
+      if ($http_user_agent ~* "(Mobile)") {
+        set $agentflag 1;
+      }
+      if ($agentflag = 1) {
+        return 301 http://gihyo.jp/;
+      }
+spec:
+  rules:
+    - host: ch05.gihyo.local
+      http:
+        paths:
+          - path: /
+            backend:
+              serviceName: echo
+              servicePort: 80
+
+```
+
+그리고 나서 변경 사항을 적용하고 Mobile 이 들어간 User-Agent 로 요청을 하면 다음과 같은 결과를 볼 수 있다.
+```
+$ kubectl apply -f simple-ingress.yml
+ingress.extensions "echo" configured
+
+$ curl http://localhost -H 'Host: ch05.gihyo.local' -H 'User-Agent: Mobile'
+<html>
+<head><title>301 Moved Permanently</title></head>
+<body>
+<center><h1>301 Moved Permanently</h1></center>
+<hr><center>nginx/1.15.10</center>
+</body>
+</html>
+```
+
+User-Agent 를 보내지 않으면 원래의 echo 응답을 확인할 수 있다.
+```
+$ curl http://localhost -H 'Host: ch05.gihyo.local'
+Hello Docker!!
+```
